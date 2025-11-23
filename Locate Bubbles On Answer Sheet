@@ -1,0 +1,77 @@
+# locator_script.py
+import cv2
+import os
+
+# --- CONFIG ---
+# This is the path to your template image.
+# MAKE SURE THIS PATH IS CORRECT.
+TEMPLATE_PATH = r"C:\Users\Usuario\Desktop\01-AD_20251023_0001.png"
+# The file where the coordinates will be saved.
+OUTPUT_FILE = "bubble_coordinates.txt"
+
+# --- GLOBALS ---
+coords = []
+display_img = None
+
+def click_event(event, x, y, flags, param):
+    """
+    This function is a callback for mouse clicks on the image window.
+    It records the (x, y) coordinates of a left mouse button click.
+    """
+    if event == cv2.EVENT_LBUTTONDOWN:
+        coords.append((x, y))
+        print(f"🟢 Clicked at: ({x}, {y})")
+        # Draw a small green circle at the clicked point for visual feedback.
+        cv2.circle(display_img, (x, y), 5, (0, 255, 0), -1)
+        cv2.imshow("Template", display_img)
+
+def main():
+    """
+    Main function to load the template, set up the window, and handle user input.
+    """
+    global display_img
+    
+    # Check if the specified template file exists.
+    if not os.path.isfile(TEMPLATE_PATH):
+        print(f"❌ Error: Template file not found at {TEMPLATE_PATH}")
+        return
+
+    # Read the template image from the specified path.
+    img = cv2.imread(TEMPLATE_PATH)
+    if img is None:
+        print(f"❌ Error: Could not read the image file. It might be corrupted or not a valid image format.")
+        return
+
+    # Create a copy of the image to draw on.
+    display_img = img.copy()
+
+    # Create a resizable window to display the template.
+    cv2.namedWindow("Template", cv2.WINDOW_NORMAL)
+    cv2.imshow("Template", display_img)
+    
+    # Set the mouse callback function for the window.
+    cv2.setMouseCallback("Template", click_event)
+
+    print("\nClick the center of each bubble on the sheet.")
+    print("When you are finished, press the 's' key to save the coordinates to a file.")
+    print("Or, press the 'q' key to quit without saving.\n")
+
+    # Loop to keep the window open until the user presses 's' or 'q'.
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('s'):
+            # Save the coordinates to the output file.
+            with open(OUTPUT_FILE, "w") as f:
+                for x, y in coords:
+                    f.write(f"{x},{y}\n")
+            print(f"\n✅ Successfully saved {len(coords)} coordinates to {OUTPUT_FILE}")
+            break
+        elif key == ord('q'):
+            print("\n❎ Exiting without saving.")
+            break
+
+    # Close all OpenCV windows when the loop ends.
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
