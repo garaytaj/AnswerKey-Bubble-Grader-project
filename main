@@ -1,0 +1,402 @@
+# ==============================
+# CELL 1 – SETTINGS & WIDGETS
+# ==============================
+import ipywidgets as widgets
+from IPython.display import display
+
+print("🔧 Bubble Grader Settings\n")
+
+# ---- Listening Answer Key (10 questions) ----
+listening_inputs = [widgets.Text(value="", description=f"L{i+1}") for i in range(10)]
+listening_box = widgets.VBox([
+    widgets.HTML("<b>Listening Answer Key (A–E). Use 0 or leave blank to IGNORE a question:</b>"),
+    *listening_inputs
+])
+
+# ---- Structure Answer Key (20 questions) ----
+structure_inputs = [widgets.Text(value="", description=f"S{i+1}") for i in range(20)]
+structure_box = widgets.VBox([
+    widgets.HTML("<b>Structure Answer Key (A–D):</b>"),
+    *structure_inputs
+])
+
+# ---- Reading Answer Key (10 questions) ----
+reading_inputs = [widgets.Text(value="", description=f"R{i+1}") for i in range(10)]
+reading_box = widgets.VBox([
+    widgets.HTML("<b>Reading Answer Key (A–D). Use 0 or leave blank to IGNORE:</b>"),
+    *reading_inputs
+])
+
+# ---- Point Values per Question ----
+points_listening = widgets.FloatText(value=1.0, description="Listening per Q")
+points_structure = widgets.FloatText(value=1.5, description="Structure per Q")
+points_reading = widgets.FloatText(value=1.0, description="Reading per Q")
+
+points_box = widgets.VBox([
+    widgets.HTML("<b>Point Values (per question):</b>"),
+    points_listening,
+    points_structure,
+    points_reading
+])
+
+display(listening_box, structure_box, reading_box, points_box)
+
+print("\n👉 Fill in the answer keys and point values above.")
+print("   When you're ready, run the NEXT CELL to lock them in and start grading.")
+
+
+# ==============================
+# CELL 2 – BUBBLE GRADING SCRIPT
+# ==============================
+import cv2
+import numpy as np
+import os
+import csv
+from google.colab import files
+import shutil
+
+# ---- Ensure settings from Cell 1 exist ----
+if 'listening_inputs' not in globals() or 'points_listening' not in globals():
+    raise RuntimeError("⚠️ Please run CELL 1 first to set up the widgets.")
+
+# ====== CAPTURE SETTINGS FROM WIDGETS ======
+
+def capture_answer_key():
+    listening_key = {f"Q{i+1}": listening_inputs[i].value.upper().strip() for i in range(10)}
+    structure_key = {f"Q{i+1}": structure_inputs[i].value.upper().strip() for i in range(20)}
+    reading_key   = {f"Q{i+1}": reading_inputs[i].value.upper().strip() for i in range(10)}
+
+    # Empty entries become "0" (ignored)
+    for key_dict in (listening_key, structure_key, reading_key):
+        for k, v in key_dict.items():
+            if v == "":
+                key_dict[k] = "0"   # 0 = ignore this question
+
+    return {
+        "listening": listening_key,
+        "structure": structure_key,
+        "reading": reading_key
+    }
+
+ANSWER_KEY = capture_answer_key()
+
+POINTS = {
+    "listening": float(points_listening.value),
+    "structure": float(points_structure.value),
+    "reading": float(points_reading.value)
+}
+
+MAX_POINTS = {
+    "listening": POINTS["listening"] * 10,  # 10 listening questions
+    "structure": POINTS["structure"] * 20,  # 20 structure questions
+    "reading": POINTS["reading"] * 10       # 10 reading questions
+}
+
+print("✅ Settings locked in:")
+print("LISTENING KEY:", ANSWER_KEY["listening"])
+print("STRUCTURE KEY:", ANSWER_KEY["structure"])
+print("READING KEY:", ANSWER_KEY["reading"])
+print("POINTS:", POINTS)
+print("MAX POINTS:", MAX_POINTS)
+
+# ==============================
+# FILE / FOLDER SETUP
+# ==============================
+
+TEST_FOLDER = "colab_test_images"
+RESULT_FOLDER = "colab_results"
+os.makedirs(TEST_FOLDER, exist_ok=True)
+os.makedirs(RESULT_FOLDER, exist_ok=True)
+
+BUBBLE_GRADING_CSV = os.path.join(RESULT_FOLDER, "bubble_grading_results.csv")
+
+TEMPLATE_SIZE = (2550, 3300)
+RADIUS = 20
+CONFIDENCE_GAP = 10
+
+TEXT_POSITIONS = {
+    'listening_score_box': (0, 0),
+    'structure_score_box': (0, 0),
+    'reading_score_box':   (0, 0),
+}
+
+OFFSETS = {
+    'listening': (0, 0),
+    'structure': (0, 0),
+    'reading':   (0, 0)
+}
+
+# ==============================
+# BUBBLE COORDINATES
+# ==============================
+
+listening_bubbles = {
+   
+}
+
+structure_bubbles = {
+   
+
+reading_bubbles = {
+ }
+}
+
+section_to_bubbles = {
+    'listening': listening_bubbles,
+    'structure': structure_bubbles,
+    'reading':   reading_bubbles
+}
+
+# ==============================
+# ALIGNMENT (ORB + HOMOGRAPHY)
+# ==============================
+
+orb = cv2.ORB_create(nfeatures=5000)
+bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+template_kp = None
+template_des = None
+template_img_resized = None
+
+def load_template_for_alignment(template_path, target_size):
+    global template_kp, template_des, template_img_resized
+    template_img = cv2.imread(template_path)
+    if template_img is None:
+        print(f"Error: Could not load template image at {template_path}.")
+        raise RuntimeError("Template load failed.")
+    template_img_resized = cv2.resize(template_img, target_size)
+    gray_template = cv2.cvtColor(template_img_resized, cv2.COLOR_BGR2GRAY)
+    template_kp, template_des = orb.detectAndCompute(gray_template, None)
+    print("Template loaded and keypoints extracted.")
+
+# ==============================
+# DETECTION & GRADING
+# ==============================
+
+def detect_answer(gray, options):
+    values = {}
+    for opt, (x, y) in options.items():
+        x_start = max(0, x - RADIUS)
+        x_end   = min(gray.shape[1], x + RADIUS)
+        y_start = max(0, y - RADIUS)
+        y_end   = min(gray.shape[0], y + RADIUS)
+
+        if x_end <= x_start or y_end <= y_start:
+            values[opt] = 255
+            continue
+
+        roi = gray[y_start:y_end, x_start:x_end]
+        values[opt] = np.mean(roi) if roi.size else 255
+
+    sorted_vals = sorted(values.items(), key=lambda v: v[1])
+
+    if len(sorted_vals) > 1:
+        darkest_val = sorted_vals[0][1]
+        second_val  = sorted_vals[1][1]
+        if second_val - darkest_val > CONFIDENCE_GAP:
+            return sorted_vals[0][0]
+
+    return None
+
+def grade_section(img, gray_processed, section, key, bubbles):
+    correct = 0
+    dx, dy = OFFSETS[section]
+
+    for q, options in bubbles.items():
+        correct_answer = key.get(q, "0")
+        shifted = {opt: (x + dx, y + dy) for opt, (x, y) in options.items()}
+        selected = detect_answer(gray_processed, shifted)
+
+        # If this question is disabled / ignored
+        if correct_answer == "0":
+            for opt, (x, y) in shifted.items():
+                color = (200, 200, 200)
+                if selected == opt:
+                    color = (0, 255, 255)  # yellow-ish for "selected but ignored"
+                if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+                    cv2.circle(img, (x, y), RADIUS, color, 2)
+            continue
+
+        # Normal scoring
+        for opt, (x, y) in shifted.items():
+            color = (0, 255, 0) if opt == correct_answer else (200, 200, 200)
+            if selected == opt:
+                if selected == correct_answer:
+                    color = (0, 255, 0)    # correct (green)
+                else:
+                    color = (0, 0, 255)    # incorrect chosen (red)
+            if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+                cv2.circle(img, (x, y), RADIUS, color, 2)
+
+        if selected == correct_answer:
+            correct += 1
+
+    return correct
+
+def draw_score(img, text, pos, font_scale=1.4, thickness=2, color=(0, 0, 0)):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    size = cv2.getTextSize(text, font, font_scale, thickness)[0]
+    x = pos[0] - size[0] // 2
+    y = pos[1] + size[1] // 2
+    if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+        cv2.putText(img, text, (x, y), font, font_scale, color, thickness)
+
+def grade_image(path, all_scores_list, template_path):
+    global template_kp, template_des, template_img_resized
+
+    img = cv2.imread(path)
+    if img is None:
+        print(f"Error: Could not load image {path}. Skipping.")
+        return
+
+    img_resized = cv2.resize(img, TEMPLATE_SIZE)
+    gray_img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+
+    kp_img, des_img = orb.detectAndCompute(gray_img_resized, None)
+
+    aligned_img  = img_resized.copy()
+    gray_aligned = gray_img_resized.copy()
+
+    if des_img is None or template_des is None:
+        print(f"Warning: Not enough keypoints to align {os.path.basename(path)}. Skipping alignment.")
+    else:
+        matches = bf.match(template_des, des_img)
+        matches = sorted(matches, key=lambda x: x.distance)
+
+        num_good_matches = int(len(matches) * 0.15)
+        if num_good_matches < 4:
+            num_good_matches = min(len(matches), 50)
+
+        good_matches = matches[:num_good_matches]
+
+        if len(good_matches) >= 4:
+            src_pts = np.float32([template_kp[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp_img[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            M, mask = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
+
+            if M is not None:
+                aligned_img  = cv2.warpPerspective(img_resized, M, TEMPLATE_SIZE)
+                gray_aligned = cv2.cvtColor(aligned_img, cv2.COLOR_BGR2GRAY)
+                print(f"✅ Successfully aligned {os.path.basename(path)}")
+
+                # Save match visualization
+                img_matches = cv2.drawMatches(
+                    template_img_resized, template_kp,
+                    img_resized, kp_img,
+                    good_matches, None,
+                    flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+                )
+                debug_output_path = os.path.join(RESULT_FOLDER, f"{os.path.splitext(os.path.basename(path))[0]}_matches.png")
+                cv2.imwrite(debug_output_path, img_matches)
+            else:
+                print(f"Warning: Homography failed for {os.path.basename(path)}.")
+        else:
+            print(f"Warning: Too few matches for {os.path.basename(path)}. Skipping alignment.")
+
+    scores = {}
+    for section in ['listening', 'structure', 'reading']:
+        correct = grade_section(aligned_img, gray_aligned, section, ANSWER_KEY[section], section_to_bubbles[section])
+        scores[section] = correct * POINTS[section]
+
+    # Draw section scores
+    draw_score(aligned_img, f"{scores['listening']:.1f}/{MAX_POINTS['listening']:.1f}", TEXT_POSITIONS['listening_score_box'])
+    draw_score(aligned_img, f"{scores['structure']:.1f}/{MAX_POINTS['structure']:.1f}", TEXT_POSITIONS['structure_score_box'])
+    draw_score(aligned_img, f"{scores['reading']:.1f}/{MAX_POINTS['reading']:.1f}",   TEXT_POSITIONS['reading_score_box'])
+
+    filename = os.path.splitext(os.path.basename(path))[0]
+    output_image_path = os.path.join(RESULT_FOLDER, f"{filename}_initial_graded.png")
+    cv2.imwrite(output_image_path, aligned_img)
+
+    print(f"📝 {filename} graded: L={scores['listening']:.1f}, S={scores['structure']:.1f}, R={scores['reading']:.1f}")
+
+    all_scores_list.append({
+        'Student Name': filename,
+        'Listening Score (pts)': scores['listening'],
+        'Structure Score (pts)': scores['structure'],
+        'Reading Score (pts)': scores['reading'],
+        'Writing Score (pts)': 0.0,
+        'Speaking Score (pts)': 0.0,
+        'Platforms Score (pts)': 0.0
+    })
+
+def batch_grade(template_path):
+    if not os.path.exists(template_path):
+        print("\nFATAL: Template file not found. Did you upload it correctly?")
+        return
+
+    load_template_for_alignment(template_path, TEMPLATE_SIZE)
+
+    if template_kp is None or template_des is None:
+        print("Error: Template features not loaded. Cannot align.")
+        return
+
+    all_scores_from_bubble = []
+
+    test_files = [f for f in os.listdir(TEST_FOLDER) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    if not test_files:
+        print(f"Warning: No valid images in {TEST_FOLDER}.")
+        return
+
+    for f in test_files:
+        grade_image(os.path.join(TEST_FOLDER, f), all_scores_from_bubble, template_path)
+
+    if all_scores_from_bubble:
+        fieldnames = [
+            'Student Name',
+            'Listening Score (pts)',
+            'Structure Score (pts)',
+            'Reading Score (pts)',
+            'Writing Score (pts)',
+            'Speaking Score (pts)',
+            'Platforms Score (pts)'
+        ]
+        with open(BUBBLE_GRADING_CSV, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_scores_from_bubble)
+        print(f"\n✅ CSV saved to: {BUBBLE_GRADING_CSV}")
+    else:
+        print("\n⚠️ No results to save.")
+
+# ==============================
+# MAIN FLOW: UPLOAD / GRADE / DOWNLOAD
+# ==============================
+print("\n--- 1. Template Upload ---")
+print("Please select your Template image (e.g., DEMO2_20250621_0001.png):")
+uploaded_template = files.upload()
+if not uploaded_template:
+    print("Error: No template uploaded. Stopping.")
+else:
+    TEMPLATE_FILENAME = list(uploaded_template.keys())[0]
+    TEMPLATE_PATH = os.path.join(".", TEMPLATE_FILENAME)
+    print(f"Template set to: {TEMPLATE_PATH}")
+
+    print("\n--- 2. Test Images Upload ---")
+    print("Please select ALL student answer sheet images (PNG/JPG):")
+    uploaded_test_files = files.upload()
+
+    if not uploaded_test_files:
+        print("Warning: No test files uploaded.")
+    else:
+        for filename in uploaded_test_files.keys():
+            os.rename(filename, os.path.join(TEST_FOLDER, filename))
+        print(f"Moved {len(uploaded_test_files)} test images into {TEST_FOLDER}.")
+
+        # Run grading
+        try:
+            batch_grade(TEMPLATE_PATH)
+        except Exception as e:
+            print(f"\nError during grading: {e}")
+
+        # --- 3. Download results ---
+        print("\n--- 3. Download Results ---")
+        if os.path.exists(RESULT_FOLDER) and len(os.listdir(RESULT_FOLDER)) > 0:
+            print("Zipping results...")
+            try:
+                zip_path = shutil.make_archive("graded_results", 'zip', root_dir=".", base_dir=RESULT_FOLDER)
+                files.download(zip_path)
+                print(f"✅ Download started: {zip_path}")
+            except Exception as e:
+                print(f"Error while zipping/downloading: {e}")
+        else:
+            print("⚠️ No results to download.")
