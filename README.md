@@ -1,6 +1,6 @@
 Automated Bubble Sheet Grading System
 
-Scan & Score with AI is a lightweight, teacher-friendly toolkit for scanning, aligning, and grading bubble-sheet tests using Python and Google Colab. The system supports full test automation with zero local installation.
+Scan & Score is a lightweight, teacher-friendly toolkit for scanning, aligning, and grading bubble-sheet tests using Python and Google Colab. The system supports full test automation with zero local installation.
 
 ⭐ Key Features
 
