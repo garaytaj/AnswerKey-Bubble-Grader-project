@@ -83,8 +83,8 @@ ipywidgets
 
 Created By
 
-Joe — English teache
+Joe — English teacher
 
 ✍️ Created By
 
-Joe — English teache
+Joe — English teacher
